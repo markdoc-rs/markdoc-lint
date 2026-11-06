@@ -1,0 +1,77 @@
+# CI for markdoc-lint — https://github.com/markdoc-rs/markdoc-lint
+#
+# The gate itself is in `.github/scripts/check.sh`, not here, so release.yml
+# runs exactly the same set before it publishes anything. A second list of
+# steps drifts, and the half that drifts is always the one nobody watches.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: markdoc-lint
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: markdoc-lint
+
+      # fmt, clippy -D warnings, the tests, a release build, and that build
+      # run over two corpora it has to find faults in (smoke.sh).
+      - name: check.sh
+        run: bash markdoc-lint/.github/scripts/check.sh markdoc-lint
+
+  # ────────────────────────────────────────────────────────────────────
+  # markdoc-lint is released for Windows and macOS as well, and most of the
+  # people who run it locally are on one of them. The gate above only
+  # proves Linux; this proves the tests pass, and the binary finds faults
+  # in a real corpus, where path separators, the executable suffix and the
+  # directory walk actually differ.
+  # ────────────────────────────────────────────────────────────────────
+  test:
+    name: test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, exe: ".exe" }
+          - { os: macos-latest,   exe: "" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: markdoc-lint
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: markdoc-lint
+          key: test-${{ matrix.os }}
+
+      - name: cargo test
+        working-directory: markdoc-lint
+        run: cargo test --all-targets
+
+      # The tests hand lint_document a string; only the binary walks a
+      # directory and turns its paths into the forward-slashed, root-relative
+      # names every diagnostic carries. That conversion is the code that
+      # differs on Windows.
+      - name: It finds faults in a corpus
+        shell: bash
+        working-directory: markdoc-lint
+        run: |
+          set -eu
+          cargo build
+          bash .github/scripts/smoke.sh "target/debug/markdoc-lint${{ matrix.exe }}"

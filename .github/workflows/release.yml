@@ -1,0 +1,188 @@
+# Release for markdoc-lint — https://github.com/markdoc-rs/markdoc-lint
+#
+# One tag publishes one binary per platform, all four from GitHub-hosted
+# runners, each with a `.sha256` beside it:
+#
+#   markdoc-lint-linux-x86_64          CI runners, and Linux authoring
+#   markdoc-lint-windows-x86_64.exe    Windows authoring
+#   markdoc-lint-macos-aarch64         Apple Silicon
+#   markdoc-lint-macos-x86_64          Intel Macs
+#
+# ## Why this is simpler than what it replaces
+#
+# markdoc-lint used to be built inside markdoc-tools, a fork-era monorepo on
+# a Forgejo instance that has no macOS runners and that a GitHub runner
+# cannot route to. So it carried two workflows and published to two forges,
+# and a consumer on macOS had to know which. This repository is hosted here,
+# so one workflow covers every platform it ships, Windows builds natively
+# rather than through cargo-xwin, and there is one place to download from.
+#
+# ## Why a bare binary and not a tar.gz
+#
+# markdoc-tools shipped an archive because it had three binaries and a
+# VERSION file to keep together. markdoc-lint is one file. A consumer that
+# still pins a markdoc-tools-<platform>.tar.gz keeps the release it pinned:
+# a published release does not disappear when a repository splits, and it
+# moves to these assets when it moves its pin.
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────
+  # Nothing is published until this passes. Same check.sh ci.yml runs, so
+  # a release cannot hold a build the ordinary gate would have rejected.
+  # ────────────────────────────────────────────────────────────────────
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: markdoc-lint
+
+      - name: The tag and Cargo.toml have to agree
+        working-directory: markdoc-lint
+        run: |
+          set -eu
+          case "${GITHUB_REF}" in
+            refs/tags/*) ;;
+            *) echo "::error::${GITHUB_REF} is not a tag." >&2; exit 1 ;;
+          esac
+          # `markdoc-lint --version` is what a writer reports in a bug, so a
+          # release whose binary disagrees with its tag is one nobody can
+          # reason about afterwards.
+          tag="${GITHUB_REF_NAME%%-*}"
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          [ "$version" = "$tag" ] || {
+            echo "::error::Cargo.toml says ${version}, tag says ${tag}" >&2; exit 1; }
+          echo "markdoc-lint ${tag}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: markdoc-lint
+
+      - name: check.sh
+        run: bash markdoc-lint/.github/scripts/check.sh markdoc-lint
+
+  # ────────────────────────────────────────────────────────────────────
+  # The binary, per platform. One matrix, three runner images, one release.
+  # ────────────────────────────────────────────────────────────────────
+  build:
+    name: ${{ matrix.slug }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # musl and statically linked, so one Linux binary runs on a CI
+          # image older than the runner that built it.
+          - { slug: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-musl, exe: "" }
+          - { slug: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc,    exe: ".exe" }
+          # macos-latest is Apple Silicon, and x86_64-apple-darwin
+          # cross-compiles from it because Xcode ships both slices of the
+          # SDK. Safe here: what markdoc-lint links is Rust, apart from psm's
+          # assembly (markdoc's stack growth), which Xcode's clang builds for
+          # either slice, as it builds ring's C for tw.
+          - { slug: macos-aarch64,  os: macos-latest,   target: aarch64-apple-darwin,      exe: "" }
+          - { slug: macos-x86_64,   os: macos-latest,   target: x86_64-apple-darwin,       exe: "" }
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: markdoc-lint
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: markdoc-lint
+          key: ${{ matrix.slug }}
+
+      # As in tw, for ring there: markdoc's stack growth (stacker, through
+      # psm) assembles a few lines with the C compiler, so the musl target
+      # needs a musl-targeting one; the other three targets have one. Without
+      # it cc-rs fails: failed to find tool "x86_64-linux-musl-gcc".
+      - name: musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        shell: bash
+        working-directory: markdoc-lint
+        run: |
+          set -eu
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            export CC_x86_64_unknown_linux_musl=musl-gcc
+            export RUSTFLAGS="-C target-feature=+crt-static"
+          fi
+          cargo build --release --target "${{ matrix.target }}"
+
+      - name: Name it for the platform
+        shell: bash
+        run: |
+          set -eu
+          asset="markdoc-lint-${{ matrix.slug }}${{ matrix.exe }}"
+          cp "markdoc-lint/target/${{ matrix.target }}/release/markdoc-lint${{ matrix.exe }}" "$asset"
+
+          # No pipeline. `set -e` does not fire on a non-final command in
+          # one, so a hasher that failed would leave an EMPTY .sha256 and
+          # this step would report success -- and tw refuses a download it
+          # cannot verify, so every consumer that fetches this through tw
+          # would break on a release that looked fine here. The asset is
+          # already named for the platform, so neither hasher needs its
+          # output rewritten.
+          # sha256sum on Linux and Git Bash, shasum on macOS.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" > "$asset.sha256"
+          fi
+          # The step checks its own work: a published checksum that does
+          # not check out is worse than none, because a consumer that
+          # verifies refuses the release and one that does not never
+          # finds out.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$asset.sha256"
+          else
+            shasum -a 256 -c "$asset.sha256"
+          fi
+          echo "--- $asset: $(wc -c < "$asset") bytes"
+
+      # A binary that will not start is worse than one that was never built:
+      # the consumer caches it and reports a tool that is "installed". Every
+      # target but the Intel Mac cross-build can run on the runner that
+      # produced it. The asset itself, not the build it was copied from, is
+      # what goes through smoke.sh -- the same corpora check.sh uses.
+      - name: It runs, and it finds things
+        if: matrix.slug != 'macos-x86_64'
+        shell: bash
+        run: |
+          set -eu
+          asset="./markdoc-lint-${{ matrix.slug }}${{ matrix.exe }}"
+          chmod +x "$asset"
+          "$asset" --version
+          bash markdoc-lint/.github/scripts/smoke.sh "$asset"
+
+      - name: Publish to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            markdoc-lint-${{ matrix.slug }}${{ matrix.exe }}
+            markdoc-lint-${{ matrix.slug }}${{ matrix.exe }}.sha256
+          prerelease: ${{ contains(github.ref_name, '-') }}

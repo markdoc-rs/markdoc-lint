@@ -1,0 +1,134 @@
+# A worked markdoc-lint.toml.
+#
+# This is what a product-documentation corpus looks like: several products,
+# each with its own manual, a shared directory of partials, variables from
+# JSON config files, a frontmatter type system, a few tags of its own, and
+# conventions about what its directories hold. Nothing here is built in —
+# delete a section and its rules go quiet.
+
+[schema]
+# Tags this corpus has and Markdoc does not, in markdoc's tag-schema format
+# (`[tags.<name>]` blocks), layered over the built-in ones. Every tool that
+# reads the corpus has to load the same file: one that does not sees these
+# tags as undeclared, which is what `undefined-tag` reports.
+overlay = ".tooling/tags.overlay.toml"
+
+[corpus]
+# Files the checks do not apply to. A translations tree usually belongs to a
+# translation service; a tooling tree is usually full of example tags inside
+# fenced code blocks, which is exactly what a rule should not read.
+skip = [
+    "README.md",
+    "CONTRIBUTING.md",
+    ".tooling/**",
+    "node_modules/**",
+    "translations/**",
+    ".*",
+    ".*/**",
+]
+
+[partials]
+dir = "partials"
+tag = "partial"
+file_attributes = ["file", "primary"]
+# A partial's name saying what kind of block it is is what makes a directory
+# of four hundred of them navigable. Empty this list to drop the check.
+prefixes = [
+    "text", "list", "instructions", "warning", "caution",
+    "notice", "info", "table", "step",
+]
+
+[anchors]
+declare_tag = "tag"
+reference_tag = "tagref"
+# `{% tag "x" /%}` is the usual form; a keyed `id=` is a common second
+# spelling. Listed in the order they are tried.
+id_attributes = ["primary", "id"]
+# One namespace per product. Two products may both declare
+# `safety_contactors` and mean different pages, and a reference that silently
+# resolved to the other product's page would be worse than one that failed.
+# `depth = 1` means one segment after `products/`, so a product's variants
+# can cross-reference each other.
+scope = { kind = "path-prefix", under = "products", depth = 1 }
+# The alternative, for a corpus with one subject:
+# scope = { kind = "global" }
+
+[variables]
+sources = ["global.config.json", "*_config.json"]
+from_frontmatter = true
+# Names a renderer injects rather than a file declaring them.
+extra = []
+
+[hardcoded-variables]
+# A value typed out where the variable that renders it belongs. Only the
+# corpus-wide file: a product's own `*_config.json` naming its model does not
+# make that name a mistake on another product's page, which is why this list
+# is narrower than `[variables] sources`.
+sources = ["global.config.json"]
+# Node kinds whose text is left alone, by their Markdoc names. This is the
+# default: emphasis is usually a page defining the term, and code is the
+# literal.
+skip_kinds = ["em", "strong", "code", "fence"]
+# Tags left alone, attributes and content both: an image's alt text names a
+# thing, and no renderer interpolates there.
+skip_tags = ["image"]
+
+[frontmatter]
+type_field = "type"
+required = ["id", "title", "status", "version", "language"]
+# Older spellings that still resolve.
+aliases = { release_note = "releaseNote" }
+# Checked for every type.
+enums = { status = ["draft", "review", "published", "unpublished", "archive"] }
+# The shape a value must have, as a regular expression, for every type. A
+# pattern is searched for in the value, so anchor it with ^ and $ to match
+# all of it. A field with a pattern has to be a quoted string: unquoted, YAML
+# reads `version: 1.10` as the number 1.1.
+patterns = { version = '^[0-9]+(\.[0-9]+)*$' }
+
+[frontmatter.types.article]
+
+[frontmatter.types.manual]
+required = ["configFile", "navFile"]
+
+[frontmatter.types.faq]
+required = ["question", "popularity"]
+
+[frontmatter.types.releaseNote]
+required = ["swVersion"]
+# Checked only for a release note.
+patterns = { swVersion = '^[0-9]+\.[0-9]+(\.[0-9]+)?$' }
+
+[frontmatter.types.notice]
+required = ["category", "effectiveDate"]
+# Checked only for a notice.
+enums = { category = ["safety", "product"] }
+
+# Requirements by path, for documents the type system cannot reach: an
+# edition carries a title and a software version and no `type`. Applies
+# whether or not a document is typed.
+[[frontmatter.files]]
+match = "products/*/editions/*.md"
+required = ["title", "swVersion"]
+patterns = { swVersion = '^[0-9]+\.[0-9]+(\.[0-9]+)?$' }
+
+# What a directory has to hold. Neither fault is visible in any one
+# document, which is why a rule that reads documents never finds it.
+#
+# A product's editions/ holds at least one edition.
+[[layout]]
+dir = "products/*/editions"
+require = "*.md"
+
+# A manual directory with pages in it has its navigation beside them.
+[[layout]]
+dir = "products/*/manual"
+when_contains = "*.md"
+require = "nav.json"
+
+# Overrides, keyed by rule name rather than by what a finding is called. A
+# corpus adopting the type system over existing pages reports the gaps
+# without failing the build on them, until the backlog is gone; and
+# `enabled = false` switches a rule off.
+[rules.frontmatter]
+severity = "warning"

@@ -1,0 +1,27 @@
+[package]
+name = "markdoc-lint"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/markdoc-rs/markdoc-lint"
+description = "Lint rules for a Markdoc corpus, over the real AST"
+
+[lib]
+name = "markdoc_lint"
+path = "src/lib.rs"
+
+[[bin]]
+name = "markdoc-lint"
+path = "src/bin/markdoc_lint.rs"
+
+[dependencies]
+markdoc = "0.1.0"
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8"
+# A frontmatter `pattern` is a regular expression in Rust's syntax, as it
+# always was. markdoc matches a schema's `matches` with regress, in
+# JavaScript's syntax; it still has this crate for its linkify port, so it
+# is already in the tree, but the lint is the one that wants Rust's syntax.
+regex = "1.12.3"

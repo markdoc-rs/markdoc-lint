@@ -1,0 +1,12 @@
+# Line endings that do not depend on the machine doing the checkout.
+#
+# A Windows runner checks out with core.autocrlf=true, which writes CRLF.
+# ci.yml's Windows test job and release.yml's windows-x86_64 leg both run
+# .github/scripts/smoke.sh under Git Bash, and bash cannot run it with CRLF
+# endings: `set -euo pipefail` arrives as `pipefail\r`, an option that does
+# not exist, and the script exits 2 before it has checked anything.
+#
+# The TOML parser accepts CRLF, but smoke.sh lints examples/markdoc-lint.toml
+# verbatim, so that file is held to the same bytes on every runner too.
+*.sh   text eol=lf
+*.toml text eol=lf

@@ -194,6 +194,94 @@ has   options-json.out "Missing required parameter: '0'"     '[functions.higher]
 lacks options-json.out '"rule": "unclosed-tag"'              '[parse] allow_indentation'
 lacks options-json.err 'warning:'                            'markdoc.toml was read without complaint'
 
+# ── 4. --vocabulary, what the corpus writes ──────────────────────────────
+#
+# The same walk, [corpus] skip and overlay as a lint: a tag in a skipped
+# directory is not counted, the overlay's tag is in the schema, and the one
+# nothing declares is what --schema drafts.
+mkdir -p vocab/guide vocab/drafts
+cat > vocab/markdoc-lint.toml <<'TOML'
+[schema]
+overlay = "tags.overlay.toml"
+
+[corpus]
+skip = ["drafts/**", ".*", ".*/**"]
+TOML
+cat > vocab/tags.overlay.toml <<'TOML'
+[tags.spec]
+self_closing = true
+
+[tags.spec.attributes.name]
+type = ["String"]
+TOML
+cat > vocab/guide/install.md <<'MD'
+# Install
+
+{% callout type="note" %}
+Read this first.
+{% /callout %}
+
+{% spec name="Weight" /%}
+
+{% badge color="green" %}New{% /badge %}
+MD
+cat > vocab/guide/use.md <<'MD'
+# Use
+
+{% callout type="warning" %}
+Mind the gap.
+{% /callout %}
+
+{% spec name="Height" /%}
+
+{% badge color="red" /%}
+MD
+printf '{%% secret /%%}\n' > vocab/drafts/wip.md
+
+run vocab-text --vocabulary --root vocab
+[ "$code" = 0 ] || fail "markdoc-lint --vocabulary exited $code"
+has   vocab-text.out 'files parsed      2'          'the pages were read and the draft skipped'
+has   vocab-text.out 'distinct tags     3'          'badge, callout and spec'
+grep -q '^badge  *2  *2  *1  NO  *both$' vocab-text.out ||
+  fail "stdout has no 'badge 2 2 1 NO both' line"
+grep -q '^spec  *2  *2  *1  yes  *self-closing$' vocab-text.out ||
+  fail "the overlay's spec is not reported as in the schema"
+has   vocab-text.out 'CLOSED note(1) warning(1)'    'a closed set is marked'
+lacks vocab-text.out 'secret'                       '[corpus] skip applies to the report'
+
+run vocab-json --vocabulary --json --root vocab
+[ "$code" = 0 ] || fail "markdoc-lint --vocabulary --json exited $code"
+has   vocab-json.out '"configured": true'           'the config file was found'
+has   vocab-json.out '"closed_set": true'           'the JSON judges closed sets'
+has   vocab-json.out '"in_schema": false'           'and says what the schema lacks'
+
+run vocab-schema --vocabulary --schema --root vocab
+[ "$code" = 0 ] || fail "markdoc-lint --vocabulary --schema exited $code"
+has   vocab-schema.out '[tags.badge]'               'the undeclared tag is drafted'
+has   vocab-schema.out 'one_of = ["green", "red"]'  'with its closed set'
+lacks vocab-schema.out '[tags.spec]'                'and the declared ones are not'
+lacks vocab-schema.out '[tags.callout]'             'markdoc'"'"'s own tags are declared'
+
+# --overlay replaces the overlay markdoc-lint.toml names, relative to where
+# the command runs: with an empty one, spec is undeclared as well.
+: > empty.overlay.toml
+run vocab-overlay --vocabulary --schema --overlay empty.overlay.toml --root vocab
+[ "$code" = 0 ] || fail "markdoc-lint --vocabulary --overlay exited $code"
+has   vocab-overlay.out '[tags.spec]'               '--overlay replaced the configured overlay'
+
+# With no markdoc-lint.toml the report says so, but not that no overlay was
+# read when --overlay named one.
+mkdir bare
+printf '{%% badge color="red" /%%}\n' > bare/page.md
+run vocab-bare --vocabulary --overlay empty.overlay.toml --root bare
+[ "$code" = 0 ] || fail "markdoc-lint --vocabulary without a config exited $code"
+has   vocab-bare.err 'no markdoc-lint.toml'         'the missing config is noted'
+lacks vocab-bare.err 'no tag overlay was read'      'though --overlay was read'
+
+run vocab-misuse --schema --root vocab
+[ "$code" = 1 ] || fail "--schema without --vocabulary exited $code"
+has   vocab-misuse.err 'options of --vocabulary'    'and says why'
+
 if [ "$failures" -gt 0 ]; then
   echo "::error::$failures smoke check(s) failed" >&2
   exit 1

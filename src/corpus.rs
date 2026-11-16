@@ -409,7 +409,7 @@ fn collect_variable_names(value: &serde_json::Value, prefix: String, out: &mut B
     }
 }
 
-fn relative(root: &Path, file: &Path) -> Option<String> {
+pub(crate) fn relative(root: &Path, file: &Path) -> Option<String> {
     Some(
         file.strip_prefix(root)
             .ok()?

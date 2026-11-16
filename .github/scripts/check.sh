@@ -6,9 +6,9 @@
 # release.yml runs it before a tag publishes anything. A second list of steps
 # drifts, and the half that drifts is always the one nobody watches.
 #
-# markdoc-lint is hosted on GitHub and built there for all four platforms it
-# ships, so there is one workflow directory and no Forgejo half to keep in
-# step with this.
+# markdoc-lint is hosted on GitHub and built there for all five platforms it
+# ships, so there is one workflow directory and nothing else to keep in step
+# with this.
 #
 # Inputs:
 #   $1          the markdoc-lint checkout              default: $PWD
@@ -42,6 +42,12 @@ step() {
 # Formatting first: it is the cheapest, and a reformat in the middle of a
 # clippy fix is a confusing diff to review.
 step "cargo fmt" cargo fmt --check
+
+# Cargo.lock is committed, and has to agree with Cargo.toml: the release
+# publishes with `cargo publish --locked`, which refuses one that does not,
+# and finding that out here costs a push rather than a release.
+lock_is_current() { cargo metadata --locked --format-version 1 >/dev/null; }
+step "Cargo.lock is current" lock_is_current
 
 if [ "$STRICT" = "1" ]; then
   step "cargo clippy" cargo clippy --all-targets -- -D warnings

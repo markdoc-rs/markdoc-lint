@@ -209,8 +209,9 @@ fn rule_for(id: &str) -> &'static str {
     }
 }
 
-/// Every tag name the merged config declares, for the near-miss advice.
-fn declared(corpus: &Corpus) -> Vec<String> {
+/// Every tag name the merged config declares: for the near-miss advice,
+/// and for what the vocabulary report calls "in schema".
+pub(crate) fn declared(corpus: &Corpus) -> Vec<String> {
     markdoc::merge_config(&corpus.markdoc)
         .tags
         .into_iter()

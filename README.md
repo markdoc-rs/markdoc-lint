@@ -563,6 +563,79 @@ literal and costs nothing, an id read from somewhere else is owned rather
 than leaked, and either way it serialises as a plain string, so the wire
 format is the one it always was.
 
+## Vocabulary report
+
+`--vocabulary` reports what the corpus writes rather than what is wrong with
+it: which tags it uses and how often, which the schema does not declare,
+which attributes take few enough values to say so with `one_of`, and what the
+schema declares that nobody writes.
+
+```
+markdoc-lint --vocabulary [--json | --schema] [--overlay <file>] [--root <dir>] [path…]
+```
+
+It reads what a lint reads: the same files under the root, or the paths
+named, with `[corpus] skip` applied, tokenized by markdoc with the corpus's
+`[parse]` options. A tag in a fence is counted, one in a code span is text.
+"In schema" is what the `schema` rule validates against, so a tag reported
+`NO` is one a lint reports as `undefined-tag`.
+
+```
+$ markdoc-lint --vocabulary --root docs
+overlay           tags.overlay.toml
+files parsed      2
+distinct tags     3
+declared tags     25
+
+tag                     uses   files  attrs  in schema form
+badge                      2       2      1  NO        both
+callout                    2       2      1  yes       block
+spec                       2       2      1  yes       self-closing
+
+── attributes, with observed value sets ──
+
+badge
+    color                 2  CLOSED green(1) red(1)
+
+callout
+    type                  2  CLOSED note(1) warning(1)
+
+spec
+    name                  2  CLOSED Height(1) Weight(1)
+
+── in schema, never used in this corpus (23) ──
+c caption chip color columns else float grid if image img input list media notice pagebreak partial qr slot swatch table tag tagref
+```
+
+`uses` counts opening and self-closing tags, and `files` the files that write
+one; `form` is `block`, `self-closing`, `both`, or `close-only` for a tag
+that is only ever closed. Each attribute is listed
+with how often it was written and its commonest values. `CLOSED` marks a
+closed set: at most 12 distinct strings, and never a variable, a function
+call or a value of another type. An attribute that was only ever given
+expressions shows `<expressions>`, one only ever given numbers, booleans and
+the like `<non-string>`, and one given more than 64 distinct strings
+keeps the first 64.
+
+`--schema` prints a draft overlay instead of the report: a `[tags.<name>]`
+table for every tag the corpus writes and the schema does not declare, each
+attribute an optional string and a closed set as its `one_of`. A starting
+point, not a schema: every `description` is `TODO`, and it leaves `inline`
+unset, which a scan of tags cannot determine. `--overlay <file>`
+reads that overlay instead of the one `markdoc-lint.toml` names; an empty
+file shows everything the corpus writes beyond markdoc's own tags.
+
+`--json` prints the report as one object: `files`, `overlay`, `configured`,
+`declared` (how many tags the schema declares), `tags` — by name, each with
+`uses`, `open`, `self_closing`, `close`, `primary`, `files`, `form`,
+`in_schema` and `attributes`, each attribute with `uses`, `values`, `capped`,
+`non_string`, `expression` and `closed_set` — then `unused` and `unparsable`.
+The report exits 0 whatever it finds; it describes, and the lint judges.
+
+From Rust, the same report is `Vocabulary::of_corpus(&Corpus::schema_only(root,
+config))`: the schema and the parse options without the index, which the
+report does not need.
+
 ## What a rule is
 
 A type implementing `Rule`. It describes itself — `describe()` returns its
@@ -620,10 +693,25 @@ bash .github/scripts/check.sh
 
 is the gate CI runs, and it runs the same here: formatting, clippy with
 warnings denied, the tests, a release build, and that build run over two
-corpora it has to find faults in (`.github/scripts/smoke.sh`). A tag
-publishes `markdoc-lint-<platform>` for Linux (x86-64, static), Windows
-(x86-64) and macOS (Apple Silicon and Intel), each with a `.sha256` beside
-it.
+corpora it has to find faults in (`.github/scripts/smoke.sh`). A release
+publishes `markdoc-lint-<platform>` for Linux (x86-64 and ARM64, static),
+Windows (x86-64 and ARM64) and macOS (Apple Silicon and Intel), each with
+a `.sha256` beside it and a GitHub build-provenance attestation, which ties
+it to the commit and the workflow run that built it:
+
+```
+gh attestation verify markdoc-lint-linux-x86_64 --repo markdoc-rs/markdoc-lint
+gh attestation verify markdoc-lint-linux-x86_64 --repo markdoc-rs/markdoc-lint \
+    --bundle markdoc-lint-linux-x86_64.sigstore.json
+```
+
+The release carries each attestation too, as `<asset>.sigstore.json`
+beside the asset; the second form checks against that copy instead of
+asking GitHub.
+
+Releasing is a version bump: push a new version in `Cargo.toml` to main,
+and `.github/workflows/release.yml` publishes the crate to crates.io and
+the binaries to a GitHub release, and tags the commit.
 
 ## Status
 

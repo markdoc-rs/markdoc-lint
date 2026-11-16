@@ -37,14 +37,22 @@
 //! open, on every keystroke. That they are the same function is the point —
 //! an editor that disagrees with CI about whether a document is clean is
 //! worse than no editor integration at all.
+//!
+//! ## A report beside the lint
+//!
+//! [`Vocabulary`] reads the same documents with the same options and says
+//! what the corpus writes rather than what is wrong with it. See
+//! [`vocabulary`].
 
 pub mod config;
 pub mod corpus;
 pub mod rules;
+pub mod vocabulary;
 
 pub use config::Config;
 pub use corpus::Corpus;
 pub use rules::{CorpusRule, Rule, RuleInfo, RuleSettings, RuleStatus};
+pub use vocabulary::Vocabulary;
 
 use markdoc::IndexMap;
 use markdoc::ast::Node;
